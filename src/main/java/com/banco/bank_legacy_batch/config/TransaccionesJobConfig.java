@@ -1,74 +1,111 @@
 package com.banco.bank_legacy_batch.config;
 
-import com.banco.bank_legacy_batch.model.Transaccion;
-import com.banco.bank_legacy_batch.processor.TransaccionProcessor;
+import java.time.LocalDate;
 
 import javax.sql.DataSource;
 
-import java.time.LocalDate;
-
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.builder.JobBuilder;
+import org.springframework.batch.core.partition.support.Partitioner;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.batch.core.launch.support.RunIdIncrementer;
-
 import org.springframework.batch.item.database.JdbcBatchItemWriter;
 import org.springframework.batch.item.database.builder.JdbcBatchItemWriterBuilder;
-
 import org.springframework.batch.item.file.FlatFileItemReader;
 import org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;
-
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
-
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
+
+import com.banco.bank_legacy_batch.model.Transaccion;
+import com.banco.bank_legacy_batch.processor.TransaccionProcessor;
+import com.banco.bank_legacy_batch.reader.TransaccionesPartitionReader;
 
 @Configuration
 public class TransaccionesJobConfig {
 
     @Bean
-    public FlatFileItemReader<Transaccion> transaccionesReader() {
+    @StepScope
+    public TransaccionesPartitionReader transaccionesReader(
 
-        return new FlatFileItemReaderBuilder<Transaccion>()
-                .name("transaccionesReader")
-                .resource(
-                        new ClassPathResource(
-                                "data/transacciones.csv"))
-                .linesToSkip(1)
-                .delimited()
-                .delimiter(",")
-                .names(
-                        "cuenta_id",
-                        "fecha",
-                        "tipo",
-                        "monto",
-                        "descripcion")
-                .fieldSetMapper(fieldSet -> {
+            @Value("#{stepExecutionContext['inicio']}")
+            Integer inicio,
 
-                    Transaccion item = new Transaccion();
+            @Value("#{stepExecutionContext['fin']}")
+            Integer fin) {
 
-                    item.setCuentaId(
-                            fieldSet.readLong("cuenta_id"));
+        FlatFileItemReader<Transaccion> reader =
+                new FlatFileItemReaderBuilder<Transaccion>()
 
-                    item.setFecha(
-                            LocalDate.parse(
-                                    fieldSet.readString("fecha")));
+                        .name("transaccionesReader-" + inicio)
 
-                    item.setTipo(
-                            fieldSet.readString("tipo"));
+                        .resource(
+                                new ClassPathResource(
+                                        "data/transacciones.csv"
+                                )
+                        )
 
-                    item.setMonto(
-                            fieldSet.readBigDecimal("monto"));
+                        .linesToSkip(1)
 
-                    item.setDescripcion(
-                            fieldSet.readString("descripcion"));
+                        .delimited()
+                        .delimiter(",")
 
-                    return item;
-                })
-                .build();
+                        .names(
+                                "cuenta_id",
+                                "fecha",
+                                "tipo",
+                                "monto",
+                                "descripcion"
+                        )
+
+                        .fieldSetMapper(fieldSet -> {
+
+                            Transaccion item =
+                                    new Transaccion();
+
+                            item.setCuentaId(
+                                    fieldSet.readLong("cuenta_id")
+                            );
+
+                            item.setFecha(
+                                    LocalDate.parse(
+                                            fieldSet.readString("fecha")
+                                    )
+                            );
+
+                            item.setTipo(
+                                    fieldSet.readString("tipo")
+                            );
+
+                            item.setMonto(
+                                    fieldSet.readBigDecimal("monto")
+                            );
+
+                            item.setDescripcion(
+                                    fieldSet.readString(
+                                            "descripcion"
+                                    )
+                            );
+
+                            return item;
+                        })
+
+                        // El estado de posición lo controla
+                        // nuestro reader de partición.
+                        .saveState(false)
+
+                        .build();
+
+        return new TransaccionesPartitionReader(
+                reader,
+                inicio,
+                fin
+        );
     }
 
     @Bean
@@ -81,7 +118,9 @@ public class TransaccionesJobConfig {
             DataSource dataSource) {
 
         return new JdbcBatchItemWriterBuilder<Transaccion>()
+
                 .dataSource(dataSource)
+
                 .sql("""
                     INSERT INTO transacciones_procesadas
                     (
@@ -102,43 +141,98 @@ public class TransaccionesJobConfig {
                         :estado
                     )
                     """)
+
                 .beanMapped()
+
                 .build();
     }
 
     @Bean
-    public Step transaccionesStep(
+    public Step transaccionesWorkerStep(
+
             JobRepository jobRepository,
+
             PlatformTransactionManager transactionManager,
-            FlatFileItemReader<Transaccion> transaccionesReader,
+
+            TransaccionesPartitionReader transaccionesReader,
+
             TransaccionProcessor transaccionesProcessor,
+
             JdbcBatchItemWriter<Transaccion> transaccionesWriter) {
 
         return new StepBuilder(
-                "transaccionesStep",
-                jobRepository)
+                "transaccionesWorkerStep",
+                jobRepository
+        )
+
                 .<Transaccion, Transaccion>chunk(
-                        10,
-                        transactionManager)
+                        3,
+                        transactionManager
+                )
+
                 .reader(transaccionesReader)
                 .processor(transaccionesProcessor)
                 .writer(transaccionesWriter)
+
                 .faultTolerant()
-                .skip(Exception.class)
+
                 .skipLimit(10)
+                .skip(Exception.class)
+
+                .retryLimit(3)
+                .retry(Exception.class)
+
+                .build();
+    }
+
+    @Bean
+    public Step transaccionesMasterStep(
+
+            JobRepository jobRepository,
+
+            Partitioner transaccionesPartitioner,
+
+            Step transaccionesWorkerStep,
+
+            TaskExecutor batchTaskExecutor) {
+
+        return new StepBuilder(
+                "transaccionesMasterStep",
+                jobRepository
+        )
+
+                .partitioner(
+                        "transaccionesWorkerStep",
+                        transaccionesPartitioner
+                )
+
+                .step(transaccionesWorkerStep)
+
+                .gridSize(3)
+
+                .taskExecutor(batchTaskExecutor)
+
                 .build();
     }
 
     @Bean
     public Job transaccionesJob(
+
             JobRepository jobRepository,
-            Step transaccionesStep) {
+
+            Step transaccionesMasterStep,
+
+            BatchJobListener batchJobListener) {
 
         return new JobBuilder(
                 "transaccionesJob",
-                jobRepository)
-                .incrementer(new RunIdIncrementer())
-                .start(transaccionesStep)
+                jobRepository
+        )
+
+                .start(transaccionesMasterStep)
+
+                .listener(batchJobListener)
+
                 .build();
     }
 }
