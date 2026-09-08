@@ -1,253 +1,300 @@
-# Banco XYZ - Migración de Procesos Batch
+# Bank Legacy BFF - Semana 4
 
-## Desarrollo Backend III - Semana 3
+## Desarrollo Backend III - PBY2203
 
-**Actividad:** Optimizando procesos batch para mejorar la resiliencia de procesos
-
-**Estudiante:** Kevin Lovera  
-**Tecnología principal:** Spring Boot 3.5.3 / Spring Batch  
-**Lenguaje:** Java  
-**Base de datos:** MySQL  
-**Build:** Maven  
+Proyecto correspondiente a la Semana 4 del curso Desarrollo Backend III, cuyo objetivo es implementar el patrón arquitectónico **Backend for Frontend (BFF)** para el sistema del Banco XYZ.
 
 ---
 
-## 1. Descripción del proyecto
+## 1. Objetivo del proyecto
 
-El proyecto consiste en la migración y modernización de procesos batch pertenecientes a un sistema legacy del Banco XYZ.
+El objetivo es implementar una solución basada en el patrón **Backend for Frontend (BFF)** que permita adaptar las respuestas del backend según las necesidades de cada tipo de cliente:
 
-La solución utiliza Spring Batch para procesar información proveniente de archivos CSV, aplicar validaciones y transformaciones mediante `ItemProcessor` y almacenar los resultados procesados en una base de datos relacional MySQL.
+- BFF Web
+- BFF Móvil
+- BFF Cajeros Automáticos
 
-Se implementaron tres procesos principales:
+La solución utiliza los datos del sistema legacy del Banco XYZ y proporciona APIs específicas para cada canal.
 
-1. Reporte de transacciones diarias.
-2. Cálculo de intereses mensuales.
-3. Generación de estados de cuenta anuales.
-
----
-
-## 2. Objetivo
-
-El objetivo es modernizar los procesos batch del sistema legacy utilizando Spring Batch, incorporando mecanismos de procesamiento por lotes, tolerancia a fallos, validación de datos y estrategias de escalamiento.
-
-La solución busca mejorar la organización, resiliencia y capacidad de procesamiento de los procesos bancarios.
+De esta manera, cada cliente recibe solamente la información que necesita, mejorando la comunicación entre frontend y backend.
 
 ---
 
-## 3. Procesos implementados
+## 2. Estrategia de implementación
 
-### 3.1 Reporte de transacciones diarias
+Para este proyecto se decidió implementar los tres BFF dentro de una misma aplicación Spring Boot, organizados mediante controladores y servicios independientes para cada canal.
 
-Job:
+La estrategia permite mantener una estructura sencilla y fácil de mantener, diferenciando claramente las responsabilidades de cada cliente.
+
+### Arquitectura
 
 ```text
-transaccionesJob
-
-Este proceso lee el archivo:
-
-transacciones.csv
-
-Los datos son procesados mediante un ItemProcessor, donde se realizan validaciones y normalizaciones de los registros.
-
-Posteriormente, los datos procesados son almacenados en:
-
-transacciones_procesadas
-
-Además, el proceso utiliza particionamiento para distribuir el procesamiento en diferentes particiones.
-
-3.2 Cálculo de intereses mensuales
-
-Job:
-
-interesesJob
-
-Archivo de entrada:
-
-intereses.csv
-
-El InteresProcessor valida los datos de las cuentas y calcula el interés correspondiente según el tipo de cuenta.
-
-Las tasas utilizadas son:
-
-Ahorro: 2%
-Préstamo: 5%
-Hipoteca: 4%
-
-Los resultados son almacenados en:
-
-intereses_procesados
-3.3 Generación de estados de cuenta anuales
-
-Job:
-
-cuentasAnualesJob
-
-Archivo de entrada:
-
-cuentas_anuales.csv
-
-El proceso valida y transforma los registros anuales antes de almacenarlos en:
-
-cuentas_anuales_procesadas
-4. Arquitectura
-
-El proyecto utiliza la arquitectura tradicional de procesamiento de Spring Batch:
-
-CSV
- │
- ▼
-ItemReader
- │
- ▼
-ItemProcessor
- │
- ▼
-ItemWriter
- │
- ▼
-MySQL
-
-En el proceso de transacciones se utiliza además una arquitectura de particionamiento:
-
-                 transaccionesJob
+                    Banco XYZ
                        │
                        ▼
-             transaccionesMasterStep
+                  MySQL - bank_bff
                        │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-     Partition-0  Partition-1  Partition-2
-          │            │            │
-          ▼            ▼            ▼
-       Worker         Worker       Worker
-       Step           Step         Step
-          │            │            │
-          └────────────┼────────────┘
                        ▼
-                      MySQL
-5. Componentes principales
-ItemReader
+              ┌──────────────────┐
+              │  Aplicación BFF   │
+              └──────────────────┘
+                 │       │       │
+                 ▼       ▼       ▼
+              ┌────┐  ┌──────┐  ┌─────┐
+              │Web │  │Mobile│  │ ATM │
+              └────┘  └──────┘  └─────┘
 
-Los lectores se encargan de obtener los registros desde los archivos CSV.
+Cada canal posee su propio controlador, servicio y formato de respuesta.
 
-Se utilizan:
-
-FlatFileItemReader
-
-y un lector especializado para el procesamiento particionado de transacciones.
-
-ItemProcessor
-
-Los processors realizan validaciones, normalización y transformación de los datos.
-
-Clases principales:
-
-TransaccionProcessor
-InteresProcessor
-CuentaAnualProcessor
-ItemWriter
-
-Los datos procesados son almacenados utilizando:
-
-JdbcBatchItemWriter
-
-Los resultados son enviados a las tablas correspondientes de MySQL.
-
-6. Manejo de errores
-
-Los procesos utilizan mecanismos de tolerancia a fallos de Spring Batch.
-
-Se utilizan configuraciones como:
-
-faultTolerant()
-skip()
-skipLimit()
-retry()
-retryLimit()
-
-Estas configuraciones permiten manejar errores durante el procesamiento sin detener necesariamente todo el Job ante un registro problemático.
-
-7. Escalamiento
-
-Para el procesamiento de transacciones se implementó particionamiento.
-
-La configuración utiliza:
-
-gridSize = 3
-
-Por lo tanto, los registros pueden ser distribuidos en tres particiones:
-
-partition-0
-partition-1
-partition-2
-
-El procesamiento utiliza un TaskExecutor para ejecutar las particiones de manera concurrente.
-
-8. Base de datos
-
-La solución utiliza MySQL.
-
-Tablas principales:
-
-transacciones_procesadas
-intereses_procesados
-cuentas_anuales_procesadas
-
-La estructura de las tablas permite almacenar los resultados generados por cada proceso batch.
-
-9. Ejecución del proyecto
-Requisitos
-Java 17 o superior
+3. Tecnologías utilizadas
+Java 17
+Spring Boot 3.5.3
+Spring Web
+Spring JDBC
+Spring Batch
 Maven
 MySQL
-Spring Boot
+Postman
 Git
-Compilar y ejecutar pruebas
+GitHub
+4. Estructura del proyecto
+src/
+└── main/
+    ├── java/
+    │   └── com/
+    │       └── banco/
+    │           └── bank_legacy_batch/
+    │               ├── config/
+    │               ├── Exception/
+    │               ├── model/
+    │               ├── processor/
+    │               ├── reader/
+    │               └── bff/
+    │                   ├── controller/
+    │                   │   ├── WebBffController.java
+    │                   │   ├── MobileBffController.java
+    │                   │   └── AtmBffController.java
+    │                   │
+    │                   ├── service/
+    │                   │   ├── WebBffService.java
+    │                   │   ├── MobileBffService.java
+    │                   │   ├── AtmBffService.java
+    │                   │   └── BffSecurityService.java
+    │                   │
+    │                   ├── repository/
+    │                   │   └── CuentaBffRepository.java
+    │                   │
+    │                   └── dto/
+    │                       ├── WebCuentaResponse.java
+    │                       ├── MobileCuentaResponse.java
+    │                       └── AtmSaldoResponse.java
+    │
+    └── resources/
+        └── application.properties
+5. Base de datos
 
-Desde la carpeta del proyecto:
+Para esta implementación se creó una nueva base de datos para mantener aislados los datos utilizados en la Semana 3.
 
-./mvnw clean test
+Base de datos:
 
-En Windows:
+bank_bff
 
-.\mvnw.cmd clean test
-10. Ejecutar los Jobs
-Transacciones
-.\mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--spring.batch.job.name=transaccionesJob"
-Intereses
-.\mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--spring.batch.job.name=interesesJob"
-Cuentas anuales
-.\mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--spring.batch.job.name=cuentasAnualesJob"
-11. Evidencias
+Tabla principal:
 
-Las evidencias de ejecución se encuentran en la carpeta:
+cuentas_bff
 
-evidencias/
+La tabla contiene información como:
 
-Se incluyen capturas de:
+ID de cuenta
+Nombre
+Saldo
+Edad
+Tipo de cuenta
+Interés
+Saldo final
+Estado
+6. BFF Web
 
-Ejecución de las pruebas Maven.
-Ejecución del Job de transacciones.
-Ejecución del Job de intereses.
-Ejecución del Job de cuentas anuales.
-Resultados generados en MySQL.
-12. Resultado de ejecución
+El BFF Web está optimizado para navegadores y aplicaciones que requieren información más completa.
 
-Los Jobs fueron ejecutados mediante Spring Batch y finalizaron correctamente con estado:
+Endpoint
+GET /bff/web/cuenta/{cuentaId}
 
-COMPLETED
+Ejemplo:
 
-Las ejecuciones pueden ser verificadas mediante los logs de Spring Batch incluidos en las evidencias.
+GET http://localhost:8080/bff/web/cuenta/101
+Header requerido
+X-Canal: WEB
+Respuesta
+{
+    "nombre": "John Doe",
+    "saldo": 5000.00,
+    "tipo": "ahorro",
+    "saldoFinal": 5100.00,
+    "estado": "PROCESADO"
+}
 
+El BFF Web entrega una respuesta con mayor cantidad de información para permitir interfaces más completas.
+
+7. BFF Móvil
+
+El BFF Móvil está diseñado para entregar respuestas más ligeras, reduciendo la cantidad de información transferida y mejorando la velocidad de respuesta.
+
+Endpoint
+GET /bff/mobile/cuenta/{cuentaId}
+
+Ejemplo:
+
+GET http://localhost:8080/bff/mobile/cuenta/101
+Header requerido
+X-Canal: MOBILE
+Respuesta
+{
+    "nombre": "John Doe",
+    "saldo": 5000.00
+}
+
+A diferencia del BFF Web, el BFF Móvil solamente entrega los datos esenciales para la consulta.
+
+8. BFF Cajeros Automáticos
+
+El BFF para cajeros automáticos está orientado a operaciones críticas y entrega respuestas mínimas y eficientes.
+
+Actualmente se implementó la consulta de saldo.
+
+Endpoint
+GET /bff/atm/cuenta/{cuentaId}/saldo
+
+Ejemplo:
+
+GET http://localhost:8080/bff/atm/cuenta/101/saldo
+Headers requeridos
+X-Canal: ATM
+X-Operacion: CONSULTAR_SALDO
+Respuesta
+{
+    "saldo": 5000.00
+}
+9. Autenticación y autorización por canal
+
+La solución incorpora una validación específica para cada canal mediante headers HTTP.
+
+Web
+X-Canal: WEB
+Mobile
+X-Canal: MOBILE
+ATM
+X-Canal: ATM
+X-Operacion: CONSULTAR_SALDO
+
+El componente BffSecurityService verifica que el canal recibido corresponda al endpoint utilizado y, en el caso del ATM, también valida la operación solicitada.
+
+Esta implementación corresponde a una validación académica de canal y operación. No reemplaza un sistema de autenticación completo basado en JWT, OAuth2 u otro mecanismo de identidad.
+
+10. Ejecución del proyecto
+Requisitos
+
+Se requiere tener instalado:
+
+Java
+Maven o utilizar el Maven Wrapper incluido
+MySQL
+Configuración de la base de datos
+
+La aplicación utiliza la base de datos:
+
+bank_bff
+
+y se conecta mediante:
+
+jdbc:mysql://localhost:3306/bank_bff
+
+Se debe verificar que MySQL se encuentre ejecutándose y que las credenciales configuradas en application.properties sean correctas.
+
+Ejecutar el proyecto
+
+Desde la raíz del proyecto:
+
+.\mvnw.cmd spring-boot:run
+
+La aplicación se ejecuta en:
+
+http://localhost:8080
+11. Pruebas con Postman
+Web
+GET http://localhost:8080/bff/web/cuenta/101
+
+Header:
+
+X-Canal: WEB
+
+Resultado esperado:
+
+200 OK
+Mobile
+GET http://localhost:8080/bff/mobile/cuenta/101
+
+Header:
+
+X-Canal: MOBILE
+
+Resultado esperado:
+
+200 OK
+ATM
+GET http://localhost:8080/bff/atm/cuenta/101/saldo
+
+Headers:
+
+X-Canal: ATM
+X-Operacion: CONSULTAR_SALDO
+
+Resultado esperado:
+
+200 OK
+12. Evidencia de ejecución
+
+Para comprobar el funcionamiento del sistema se realizaron pruebas utilizando Postman.
+
+BFF Web
+
+La API respondió correctamente con código:
+
+200 OK
+
+y entregó la información completa de la cuenta.
+
+BFF Mobile
+
+La API respondió correctamente con:
+
+200 OK
+
+y entregó únicamente los datos esenciales de la cuenta.
+
+BFF ATM
+
+La API respondió correctamente con:
+
+200 OK
+
+y entregó el saldo de la cuenta.
+
+También se verificó mediante Maven que el proyecto compila y ejecuta correctamente sus pruebas:
+
+Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+
+BUILD SUCCESS
 13. Repositorio
 
-El código fuente del proyecto se encuentra versionado en GitHub.
+Código fuente del proyecto:
 
+https://github.com/Kevinlovera/bank-legacy-bff-week4
 
 14. Conclusión
 
-La implementación permitió modernizar los procesos batch del sistema legacy del Banco XYZ mediante Spring Batch.
+La implementación permite aplicar el patrón Backend for Frontend (BFF) diferenciando las necesidades de los clientes Web, Móvil y Cajeros Automáticos.
 
-La solución incorpora lectura de archivos CSV, procesamiento y validación mediante ItemProcessor, escritura mediante JdbcBatchItemWriter, tolerancia a fallos y una estrategia de escalamiento mediante particionamiento.
+Cada canal posee endpoints y respuestas adaptadas a su propósito, evitando entregar información innecesaria y permitiendo una comunicación más adecuada entre los distintos clientes y el backend.
 
-Con esto se obtiene una arquitectura más organizada y preparada para procesar información bancaria mediante procesos batch.
+La solución fue desarrollada utilizando Spring Boot, Spring JDBC y MySQL, incorporando además validaciones específicas para los canales y operaciones solicitadas.
